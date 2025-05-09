@@ -22,12 +22,5 @@
 	},
 	"manufacturer": "Gude Systems",
 	"products": ["Smart PDU"],
-	"keywords": [
-		"gude",
-		"smartpdu",
-		"pdu",
-		"power",
-		"device control",
-		"power distribution unit"
-	]
+	"keywords": ["gude", "smartpdu", "pdu", "power", "device control", "power distribution unit"]
 }
