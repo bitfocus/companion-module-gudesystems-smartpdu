@@ -27,8 +27,6 @@ export function UpdateVariableDefinitions(self: SmartPDUInstance): void {
 
 	if (self.STATUS?.outputs) {
 		self.STATUS.outputs.forEach((outlet, index) => {
-			console.log('Outlet:', outlet)
-			console.log('Index:', index)
 			variables.push({
 				name: `Outlet ${index + 1} Name`,
 				variableId: `outlet_${index + 1}_name`,
@@ -46,7 +44,7 @@ export function UpdateVariableDefinitions(self: SmartPDUInstance): void {
 		for (const key in sensorMap) {
 			variables.push({
 				name: `${sensorMap[key].name} (${key})`,
-				variableId: `sensor_${key.replace(/\./g, '_')}`,
+				variableId: `sensor_${key.replace(/\./g, '_').replace(/\s+/g, '_').replace(/\:/g, '')}`, // Replace dots with underscores, spaces with underscores, colons with nothing
 			})
 		}
 	}
@@ -74,7 +72,7 @@ export function CheckVariables(self: SmartPDUInstance): void {
 	const sensorMap = flattenSensorFields(self.STATUS)
 	for (const key in sensorMap) {
 		const value = sensorMap[key].value
-		variableValues[`sensor_${key.replace(/\./g, '_')}`] = value
+		variableValues[`sensor_${key.replace(/\./g, '_').replace(/\s+/g, '_').replace(/\:/g, '')}`] = value
 	}
 
 	self.setVariableValues(variableValues)
