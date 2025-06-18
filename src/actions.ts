@@ -18,7 +18,16 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			try {
-				await setOutletState(self, Number(action.options.outlet), 'on')
+				const outletNum = Number(action.options.outlet)
+				if (outletNum == -1) {
+					//all outlets
+					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
+						await setOutletState(self, i, 'on')
+					}
+				}
+				else {
+					await setOutletState(self, outletNum, 'on')
+				}
 			} catch (err: any) {
 				self.log('error', `Failed to turn outlet ON: ${err.message}`)
 			}
@@ -38,7 +47,16 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			try {
-				await setOutletState(self, Number(action.options.outlet), 'off')
+				const outletNum = Number(action.options.outlet)
+				if (outletNum == -1) {
+					//all outlets
+					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
+						await setOutletState(self, i, 'off')
+					}
+				}
+				else {
+					await setOutletState(self, Number(action.options.outlet), 'off')
+				}
 			} catch (err: any) {
 				self.log('error', `Failed to turn outlet ON: ${err.message}`)
 			}
@@ -58,7 +76,16 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			try {
-				await toggleOutlet(self, Number(action.options.outlet))
+				const outletNum = Number(action.options.outlet)
+				if (outletNum == -1) {
+					//all outlets
+					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
+						await toggleOutlet(self, i)
+					}
+				}
+				else {
+					await toggleOutlet(self, outletNum)
+				}
 			} catch (err: any) {
 				self.log('error', `Failed to toggle outlet: ${err.message}`)
 			}
@@ -78,7 +105,16 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			try {
-				await resetOutlet(self, Number(action.options.outlet))
+				const outletNum = Number(action.options.outlet)
+				if (outletNum == -1) {
+					//all outlets
+					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
+						await resetOutlet(self, i)
+					}
+				}
+				else {
+					await resetOutlet(self, outletNum)
+				}
 			} catch (err: any) {
 				self.log('error', `Failed to reset outlet: ${err.message}`)
 			}
