@@ -24,8 +24,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
 						await setOutletState(self, i, 'on')
 					}
-				}
-				else {
+				} else {
 					await setOutletState(self, outletNum, 'on')
 				}
 			} catch (err: any) {
@@ -53,8 +52,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
 						await setOutletState(self, i, 'off')
 					}
-				}
-				else {
+				} else {
 					await setOutletState(self, Number(action.options.outlet), 'off')
 				}
 			} catch (err: any) {
@@ -82,8 +80,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
 						await toggleOutlet(self, i)
 					}
-				}
-				else {
+				} else {
 					await toggleOutlet(self, outletNum)
 				}
 			} catch (err: any) {
@@ -111,8 +108,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 					for (let i = 1; i <= self.STATUS.outputs.length; i++) {
 						await resetOutlet(self, i)
 					}
-				}
-				else {
+				} else {
 					await resetOutlet(self, outletNum)
 				}
 			} catch (err: any) {

@@ -13,10 +13,10 @@ This module allows you to control Smart PDUs from [Gude Systems](https://www.gud
 ## Actions
 
 - **Turn ON Outlet**  
-  Turns a specified outlet on.
+  Turns a specified outlet (or all outlets) on.
 
 - **Turn OFF Outlet**  
-  Turns a specified outlet off.
+  Turns a specified outlet (or all outlets) off.
 
 - **Toggle Outlet**  
   Flips the state of the outlet (on → off or off → on).
@@ -35,13 +35,13 @@ This module allows you to control Smart PDUs from [Gude Systems](https://www.gud
 
 ## Variables
 
-- `hostname` – Device hostname  
-- `firmware` – Firmware version  
-- `uptime` – Device uptime in seconds  
-- `outlet_count` – Number of detected outlets  
-- `outlet_1_name`, `outlet_1_state`, etc. – Outlet names and ON/OFF state  
-- `sensor_XXX_L1_0`, etc. – Flattened sensor values with their names and units  
-  (e.g., `Voltage (664.L1.0)` → `sensor_664_L1_0`)
+- `hostname` – Device hostname
+- `firmware` – Firmware version
+- `uptime` – Device uptime in seconds
+- `outlet_count` – Number of detected outlets
+- `outlet_1_name`, `outlet_1_state`, etc. – Outlet names and ON/OFF state
+- `sensor_XXX_L1_0`, etc. – Flattened sensor values with their names, values and units  
+  (e.g., `Sensor 664.L1.0` → `sensor_664_L1_0_name`, `sensor_664_L1_0_value`, `sensor_664_L1_0_unit`)
 
 ---
 

@@ -95,13 +95,13 @@ export function UpdateOutletChoices(self: SmartPDUInstance): void {
 		return
 	}
 
-	//add an "all" option
-	self.CHOICES_OUTLETS.push({ id: -1, label: 'All Outlets' })
-
 	self.CHOICES_OUTLETS = self.STATUS.outputs.map((o, index) => ({
 		id: index + 1,
 		label: `${index + 1} - ${o.name ?? 'Unnamed Outlet'}`,
 	}))
+
+	//add an "all outlets" option to the beginning
+	self.CHOICES_OUTLETS.unshift({ id: -1, label: 'All Outlets' })
 }
 
 // --- SENSOR HELPERS ---
