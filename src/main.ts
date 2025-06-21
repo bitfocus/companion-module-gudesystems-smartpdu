@@ -12,6 +12,7 @@ export class SmartPDUInstance extends InstanceBase<ModuleConfig> {
 	authHeader: Record<string, string> = {} // Authentication header for API requests
 	pollingInterval!: NodeJS.Timeout // Polling interval for status updates
 	CHOICES_OUTLETS: { id: number; label: string }[] = [] // Choices for outlets
+	CHOICES_OUTLETS_ALL: { id: number; label: string }[] = [] // Choices for outlets including "All Outlets"
 	STATUS: GudeStatusResponse = {} as GudeStatusResponse // Status data from the PDU
 
 	constructor(internal: unknown) {

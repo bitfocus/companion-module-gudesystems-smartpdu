@@ -56,7 +56,7 @@ async function GetStatusData(self: SmartPDUInstance): Promise<void> {
 
 		if (!res.ok) {
 			const text = await res.text()
-			throw new Error(`Failed to fetch status: ${res.status} - ${text}`)
+			self.log('error', `Failed to fetch status: ${res.status} - ${text}`)
 		}
 
 		const data = (await res.json()) as GudeStatusResponse
@@ -87,6 +87,7 @@ export function StopPolling(self: SmartPDUInstance): void {
 export function UpdateOutletChoices(self: SmartPDUInstance): void {
 	self.log('debug', 'Updating outlet choices')
 	self.CHOICES_OUTLETS = []
+	self.CHOICES_OUTLETS_ALL = []
 
 	if (!self.STATUS.outputs || self.STATUS.outputs.length === 0) {
 		self.log('warn', 'No outlets found in status data')
@@ -100,8 +101,11 @@ export function UpdateOutletChoices(self: SmartPDUInstance): void {
 		label: `${index + 1} - ${o.name ?? 'Unnamed Outlet'}`,
 	}))
 
+	//copy the choices to the all outlets array
+	self.CHOICES_OUTLETS_ALL = [...self.CHOICES_OUTLETS]
+
 	//add an "all outlets" option to the beginning
-	self.CHOICES_OUTLETS.unshift({ id: -1, label: 'All Outlets' })
+	self.CHOICES_OUTLETS_ALL.unshift({ id: -1, label: 'All Outlets' })
 }
 
 // --- SENSOR HELPERS ---
@@ -128,30 +132,49 @@ export function getSensorTypeLabel(type: number): string {
 // --- OUTLET COMMANDS ---
 
 export async function setOutletState(self: SmartPDUInstance, outlet: number, state: PowerState): Promise<void> {
-	if (state === 'reset') return await resetOutlet(self, outlet)
-	if (state === 'toggle') return await toggleOutlet(self, outlet)
+	try {
+		if (state === 'reset') return await resetOutlet(self, outlet)
+		if (state === 'toggle') return await toggleOutlet(self, outlet)
 
-	const value = state === 'on' ? 1 : 0
-	const url = new URL('/ov.html', `http://${self.config.ip}`)
-	url.searchParams.set('cmd', '1')
-	url.searchParams.set('p', String(outlet))
-	url.searchParams.set('s', String(value))
+		const value = state === 'on' ? 1 : 0
+		const url = new URL('/ov.html', `http://${self.config.ip}`)
 
-	const res = await fetch(url.toString(), {
-		method: 'GET',
-		headers: self.authHeader,
-	})
+		let outletString = String(outlet)
+		if (outlet ==  -1) {
+			// Special case for "All Outlets"
+			outletString = 'all'
+		}
+		url.searchParams.set('cmd', '1')
+		url.searchParams.set('p', outletString)
+		url.searchParams.set('s', String(value))
 
-	if (!res.ok) {
-		const text = await res.text()
-		throw new Error(`Failed to set outlet state: ${res.status} - ${text}`)
+		const res = await fetch(url.toString(), {
+			method: 'GET',
+			headers: self.authHeader,
+		})
+
+		if (!res.ok) {
+			const text = await res.text()
+			self.log('error', `Failed to set outlet state for outlet ${outlet}: ${res.status} - ${text}`)
+		}
+	}
+	catch(error) {
+		self.log('error', `Error setting outlet state for outlet ${outlet}: ${error instanceof Error ? error.message : String(error)}`)
+		return
 	}
 }
 
 export async function resetOutlet(self: SmartPDUInstance, outlet: number): Promise<void> {
 	const url = new URL('/', `http://${self.config.ip}`)
+
+	let outletString = String(outlet)
+	if (outlet ==  -1) {
+		// Special case for "All Outlets"
+		outletString = 'all'
+	}
+
 	url.searchParams.set('cmd', '12')
-	url.searchParams.set('p', String(outlet))
+	url.searchParams.set('p', outletString)
 
 	const res = await fetch(url.toString(), {
 		method: 'GET',
@@ -160,16 +183,25 @@ export async function resetOutlet(self: SmartPDUInstance, outlet: number): Promi
 
 	if (!res.ok) {
 		const text = await res.text()
-		throw new Error(`Failed to reset outlet: ${res.status} - ${text}`)
+		self.log('error', `Failed to reset outlet ${outlet}: ${res.status} - ${text}`)
 	}
 }
 
 export async function toggleOutlet(self: SmartPDUInstance, outlet: number): Promise<void> {
-	const outletState = self.STATUS.outputs?.[outlet - 1]
-	if (!outletState) throw new Error(`Outlet ${outlet} not found`)
+	if (outlet == -1) {
+		//cannot toggle all outlets at once
+		self.log('warn', 'Cannot toggle all outlets at once. Use individual outlet toggling instead.')
+	}
+	else {
+		const outletState = self.STATUS.outputs?.[outlet - 1]
+		if (!outletState) {
+			self.log('warn', `Outlet ${outlet} not found in status data`)
+			return
+		}
 
-	const newState: PowerState = outletState.state ? 'off' : 'on'
-	await setOutletState(self, outlet, newState)
+		const newState: PowerState = outletState.state ? 'off' : 'on'
+		await setOutletState(self, outlet, newState)
+	}	
 }
 
 export async function setOutletBatchState(
