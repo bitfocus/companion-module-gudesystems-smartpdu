@@ -8,9 +8,16 @@ export interface GudePDUOptions {
 }
 
 export interface FlatSensorField {
+	sensorName: string
+	id: string
+	safeId: string
+	type: number
+	typeName: string
 	value: number
+	valueString: string
 	unit: string
 	name: string
+	decPrecision: number
 }
 
 export type FlatSensorMap = Record<string, FlatSensorField>

@@ -14,8 +14,8 @@ export async function InitConnection(self: SmartPDUInstance): Promise<void> {
 	self.log('debug', 'Initializing PDU connection')
 	BuildAuthHeader(self)
 
-	await GetStatusData(self)
-	UpdateOutletChoices(self)
+	//await GetStatusData(self)
+
 	self.updateStatus(InstanceStatus.Ok, 'Connected')
 	self.log('debug', 'PDU initialized successfully')
 
@@ -60,7 +60,17 @@ async function GetStatusData(self: SmartPDUInstance): Promise<void> {
 		}
 
 		const data = (await res.json()) as GudeStatusResponse
+		//console.log(JSON.stringify(data.sensor_descr, null, 2))
 		processStatusData(self, data)
+
+		//if we have not yet updated outlet choices, do it now
+		if (self.CHOICES_OUTLETS.length === 0) {
+			UpdateOutletChoices(self)
+
+			self.updateActions()
+			self.updateFeedbacks()
+			self.updateVariableDefinitions()
+		}
 	} catch (error: any) {
 		self.log('error', `Failed to fetch status: ${error.message}`)
 		self.updateStatus(InstanceStatus.ConnectionFailure, error.message)
@@ -68,11 +78,32 @@ async function GetStatusData(self: SmartPDUInstance): Promise<void> {
 }
 
 export function StartPolling(self: SmartPDUInstance): void {
-	if (self.pollingInterval) clearInterval(self.pollingInterval)
+	if (self.pollingInterval) {
+		clearTimeout(self.pollingInterval)
+	}
 
-	const intervalMs = self.config.pollingInterval
-	self.pollingInterval = setInterval(() => GetStatusData(self), intervalMs)
-	self.log('debug', `Polling started with interval ${intervalMs} ms`)
+	let isPolling = false
+
+	const poll = async () => {
+		if (isPolling) {
+			self.log('warn', 'Polling skipped: previous request still running')
+			return
+		}
+
+		isPolling = true
+
+		try {
+			await GetStatusData(self)
+		} catch (err: any) {
+			self.log('error', `Polling error: ${err.message}`)
+		} finally {
+			isPolling = false
+			self.pollingInterval = setTimeout(poll, self.config.pollingInterval)
+		}
+	}
+
+	self.log('debug', `Polling started with interval ${self.config.pollingInterval} ms`)
+	poll()
 }
 
 export function StopPolling(self: SmartPDUInstance): void {
@@ -140,7 +171,7 @@ export async function setOutletState(self: SmartPDUInstance, outlet: number, sta
 		const url = new URL('/ov.html', `http://${self.config.ip}`)
 
 		let outletString = String(outlet)
-		if (outlet ==  -1) {
+		if (outlet == -1) {
 			// Special case for "All Outlets"
 			outletString = 'all'
 		}
@@ -157,9 +188,11 @@ export async function setOutletState(self: SmartPDUInstance, outlet: number, sta
 			const text = await res.text()
 			self.log('error', `Failed to set outlet state for outlet ${outlet}: ${res.status} - ${text}`)
 		}
-	}
-	catch(error) {
-		self.log('error', `Error setting outlet state for outlet ${outlet}: ${error instanceof Error ? error.message : String(error)}`)
+	} catch (error) {
+		self.log(
+			'error',
+			`Error setting outlet state for outlet ${outlet}: ${error instanceof Error ? error.message : String(error)}`,
+		)
 		return
 	}
 }
@@ -168,7 +201,7 @@ export async function resetOutlet(self: SmartPDUInstance, outlet: number): Promi
 	const url = new URL('/', `http://${self.config.ip}`)
 
 	let outletString = String(outlet)
-	if (outlet ==  -1) {
+	if (outlet == -1) {
 		// Special case for "All Outlets"
 		outletString = 'all'
 	}
@@ -191,8 +224,7 @@ export async function toggleOutlet(self: SmartPDUInstance, outlet: number): Prom
 	if (outlet == -1) {
 		//cannot toggle all outlets at once
 		self.log('warn', 'Cannot toggle all outlets at once. Use individual outlet toggling instead.')
-	}
-	else {
+	} else {
 		const outletState = self.STATUS.outputs?.[outlet - 1]
 		if (!outletState) {
 			self.log('warn', `Outlet ${outlet} not found in status data`)
@@ -201,7 +233,7 @@ export async function toggleOutlet(self: SmartPDUInstance, outlet: number): Prom
 
 		const newState: PowerState = outletState.state ? 'off' : 'on'
 		await setOutletState(self, outlet, newState)
-	}	
+	}
 }
 
 export async function setOutletBatchState(
@@ -297,20 +329,73 @@ export function flattenSensorFields(status: GudeStatusResponse): FlatSensorMap {
 
 		for (let sensorIndex = 0; sensorIndex < descr.num; sensorIndex++) {
 			const prop = descr.properties[sensorIndex]
-			const sensorId = prop?.id ?? sensorIndex.toString()
+			let sensorId = prop?.id ?? sensorIndex.toString()
+			let sensorName = normalizeSensorName(sensorId)
+			sensorId = normalizeSensorId(sensorId) // Normalize sensor ID
+
+			const safeSensorId = sensorId.replace(/\./g, '').replace(/\s+/g, '').replace(/\:/g, '')
 			const fieldValues = values.values[sensorIndex]
 			if (!fieldValues) continue
 
+			//console.log(descr)
+
 			descr?.fields?.forEach((field, fieldIndex) => {
-				const key = `${descr.type}.${sensorId}.${fieldIndex}`
+				//const key = `${descr.type}.${sensorId}.${fieldIndex}`
+
+				//remove sapces, colons, and convert to lowercase for safe field name
+				const safeFieldName = field.name.replace(/\s+/g, '').replace(/\:/g, '').toLowerCase()
+				const key = `sensor_${safeSensorId}_${safeFieldName}`
+				//console.log(key)
+				//console.log(field)
 				result[key] = {
+					sensorName: sensorName,
+					id: sensorId,
+					safeId: safeSensorId,
+					type: descr.type,
+					typeName: getSensorTypeLabel(descr.type),
 					value: fieldValues[fieldIndex]?.v ?? NaN,
+					valueString: fieldValues[fieldIndex]?.v?.toString() ?? '',
 					unit: field.unit,
 					name: field.name,
+					decPrecision: field.decPrecision ?? 0, // Default to 0 if not specified
 				}
 			})
 		}
 	}
 
 	return result
+}
+
+function normalizeSensorId(id: string): string {
+	// Match full pattern with input (e.g., "2: 7210 - I1")
+	const inputMatch = id.match(/^(\d+):.*?- I(\d+)$/)
+	if (inputMatch) {
+		return `${inputMatch[1]}_input${inputMatch[2]}`
+	}
+
+	// Match pattern with no input (e.g., "2: 7210")
+	const sensorMatch = id.match(/^(\d+):/)
+	if (sensorMatch) {
+		return sensorMatch[1]
+	}
+
+	// Fallback: sanitize
+	return id.replace(/[^\w]/g, '_')
+}
+
+function normalizeSensorName(id: string): string {
+	// Match full pattern with input (e.g., "2: 7210 - I1")
+	const inputMatch = id.match(/^(\d+):.*?- I(\d+)$/)
+	if (inputMatch) {
+		return `${inputMatch[1]} Input ${inputMatch[2]}`
+	}
+
+	// Match pattern with no input (e.g., "2: 7210")
+	const sensorMatch = id.match(/^(\d+):/)
+	if (sensorMatch) {
+		return `${sensorMatch[1]}`
+	}
+
+	// Fallback: just return the original or simplified version
+	return id
 }
