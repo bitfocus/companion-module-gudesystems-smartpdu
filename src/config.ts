@@ -26,7 +26,6 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			label: 'PDU IP Address',
 			width: 6,
 			regex: Regex.IP,
-			required: true,
 		},
 		{
 			type: 'checkbox',
