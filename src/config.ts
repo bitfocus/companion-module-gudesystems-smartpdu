@@ -40,7 +40,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			label: 'Username',
 			width: 6,
 			default: 'admin',
-			isVisible: (config) => Boolean(config.useAuthentication),
+			isVisible: (config) => config.useAuthentication == true,
 		},
 		{
 			type: 'textinput',
@@ -48,7 +48,7 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 			label: 'Password',
 			width: 6,
 			default: 'admin',
-			isVisible: (config) => Boolean(config.useAuthentication),
+			isVisible: (config) => config.useAuthentication == true,
 		},
 		{
 			type: 'static-text',
