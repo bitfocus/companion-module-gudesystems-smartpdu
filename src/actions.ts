@@ -21,6 +21,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			await setOutletState(self, Number(action.options.outlet), 'on')
+			await self.refreshStatus()
 		},
 	}
 
@@ -37,6 +38,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			await setOutletState(self, Number(action.options.outlet), 'off')
+			await self.refreshStatus()
 		},
 	}
 
@@ -53,6 +55,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			await toggleOutlet(self, Number(action.options.outlet))
+			await self.refreshStatus()
 		},
 	}
 
@@ -69,6 +72,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 		],
 		callback: async (action) => {
 			await resetOutlet(self, Number(action.options.outlet))
+			await self.refreshStatus()
 		},
 	}
 
@@ -122,6 +126,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 			} catch (err: any) {
 				self.log('error', `Failed to start delayed switch: ${err.message}`)
 			}
+			await self.refreshStatus()
 		},
 	}
 
@@ -142,6 +147,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 			} catch (err: any) {
 				self.log('error', `Failed to cancel delayed switch: ${err.message}`)
 			}
+			await self.refreshStatus()
 		},
 	}
 
@@ -189,6 +195,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 					await sleep(delayMs)
 				}
 			}
+			await self.refreshStatus()
 		},
 	}
 
@@ -213,6 +220,7 @@ export function UpdateActions(self: SmartPDUInstance): void {
 				} catch (err: any) {
 					self.log('error', `Failed to reset energy counter: ${err.message}`)
 				}
+				await self.refreshStatus()
 			},
 		}
 	}

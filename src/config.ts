@@ -5,6 +5,7 @@ export interface ModuleConfig {
 	ip: string
 	useHttps: boolean
 	port: number
+	httpsPort: number
 	allowSelfSigned: boolean
 	useAuthentication: boolean
 	username: string
@@ -44,12 +45,22 @@ export function GetConfigFields(): SomeCompanionConfigField[] {
 		{
 			type: 'number',
 			id: 'port',
-			label: 'HTTP(S) Port',
+			label: 'HTTP Port',
 			width: 3,
-			default: 0,
-			min: 0,
+			default: 80,
+			min: 1,
 			max: 65535,
-			tooltip: '0 = use the default port for the selected protocol (80 for HTTP, 443 for HTTPS)',
+			isVisible: (config) => config.useHttps != true,
+		},
+		{
+			type: 'number',
+			id: 'httpsPort',
+			label: 'HTTPS Port',
+			width: 3,
+			default: 443,
+			min: 1,
+			max: 65535,
+			isVisible: (config) => config.useHttps == true,
 		},
 		{
 			type: 'checkbox',

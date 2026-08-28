@@ -18,8 +18,7 @@ function getDispatcher(self: SmartPDUInstance): Dispatcher | undefined {
 
 function buildUrl(self: SmartPDUInstance, path: string): URL {
 	const protocol = self.config.useHttps ? 'https' : 'http'
-	const defaultPort = self.config.useHttps ? 443 : 80
-	const port = self.config.port || defaultPort
+	const port = self.config.useHttps ? self.config.httpsPort || 443 : self.config.port || 80
 	return new URL(path, `${protocol}://${self.config.ip}:${port}`)
 }
 
@@ -131,7 +130,9 @@ export function StartPolling(self: SmartPDUInstance): void {
 	}
 
 	self.debugLog(`Polling started with interval ${self.config.pollingInterval} ms`)
-	poll()
+	// InitConnection() already did one fetch just before calling this — schedule the
+	// first poll rather than firing an immediate redundant one.
+	self.pollingInterval = setTimeout(poll, self.config.pollingInterval)
 }
 
 export function StopPolling(self: SmartPDUInstance): void {
