@@ -3,6 +3,7 @@ package-lock.json
 node_modules/
 /pkg
 /pkg.tgz
+*.tgz
 /dist
 DEBUG-*
 /.yarn
