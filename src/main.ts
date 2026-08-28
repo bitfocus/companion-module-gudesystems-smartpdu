@@ -1,3 +1,4 @@
+import './polyfill.js'
 import { InstanceBase, runEntrypoint, type SomeCompanionConfigField } from '@companion-module/base'
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpgradeScripts } from './upgrades.js'
