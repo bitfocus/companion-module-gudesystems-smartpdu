@@ -1,5 +1,6 @@
 import { combineRgb, type CompanionFeedbackDefinition } from '@companion-module/base'
 import type { SmartPDUInstance } from './main.js'
+import { computeTotalActivePowerWatts } from './variables.js'
 
 export function UpdateFeedbacks(self: SmartPDUInstance): void {
 	const feedbacks: Record<string, CompanionFeedbackDefinition> = {}
@@ -50,6 +51,33 @@ export function UpdateFeedbacks(self: SmartPDUInstance): void {
 			const outlet = self.STATUS.outputs?.[outletIndex]
 			return outlet?.state === 0
 		},
+	}
+
+	if (computeTotalActivePowerWatts(self) !== null) {
+		feedbacks['power_threshold'] = {
+			type: 'boolean',
+			name: 'Total Power Above Threshold',
+			description: 'Flags when whole-unit power draw meets or exceeds a wattage you set — an early overload warning.',
+			options: [
+				{
+					type: 'number',
+					label: 'Threshold (W)',
+					id: 'threshold',
+					default: 1000,
+					min: 0,
+					max: 100000,
+				},
+			],
+			defaultStyle: {
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(255, 102, 0),
+			},
+			callback: (feedback) => {
+				const watts = computeTotalActivePowerWatts(self)
+				if (watts === null) return false
+				return watts >= Number(feedback.options.threshold)
+			},
+		}
 	}
 
 	self.setFeedbackDefinitions(feedbacks)
