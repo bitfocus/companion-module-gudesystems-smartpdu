@@ -1,6 +1,40 @@
 import { InstanceStatus } from '@companion-module/base'
+import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici'
 import type { SmartPDUInstance } from './main.js'
 import type { GudeStatusResponse, FlatSensorMap, PowerState } from './types.js'
+import { parseSensorPropertyId, sensorDisplayName } from './sensorId.js'
+
+// --- TRANSPORT ---
+
+let insecureAgent: Agent | undefined
+
+function getDispatcher(self: SmartPDUInstance): Dispatcher | undefined {
+	if (!self.config.useHttps || !self.config.allowSelfSigned) return undefined
+	if (!insecureAgent) {
+		insecureAgent = new Agent({ connect: { rejectUnauthorized: false } })
+	}
+	return insecureAgent
+}
+
+function buildUrl(self: SmartPDUInstance, path: string): URL {
+	const protocol = self.config.useHttps ? 'https' : 'http'
+	const port = self.config.useHttps ? self.config.httpsPort || 443 : self.config.port || 80
+	return new URL(path, `${protocol}://${self.config.ip}:${port}`)
+}
+
+async function pduFetch(self: SmartPDUInstance, url: URL, method: 'GET' = 'GET'): Promise<string> {
+	const res = await undiciFetch(url.toString(), {
+		method,
+		headers: self.authHeader,
+		dispatcher: getDispatcher(self),
+	})
+
+	if (!res.ok) {
+		throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+	}
+
+	return res.text()
+}
 
 // --- INIT + POLLING ---
 
@@ -11,23 +45,21 @@ export async function InitConnection(self: SmartPDUInstance): Promise<void> {
 		return
 	}
 
-	self.log('debug', 'Initializing PDU connection')
+	self.debugLog('Initializing PDU connection')
 	BuildAuthHeader(self)
 
-	//await GetStatusData(self)
-
-	self.updateStatus(InstanceStatus.Ok, 'Connected')
-	self.log('debug', 'PDU initialized successfully')
+	await RefreshStatus(self)
 
 	self.updateActions()
 	self.updateFeedbacks()
 	self.updateVariableDefinitions()
+	self.updatePresets()
 
 	if (self.config.enablePolling) {
-		self.log('debug', 'Starting polling')
+		self.debugLog('Starting polling')
 		StartPolling(self)
 	} else {
-		self.log('debug', 'Polling is disabled')
+		self.debugLog('Polling is disabled')
 		StopPolling(self)
 	}
 }
@@ -43,33 +75,28 @@ function BuildAuthHeader(self: SmartPDUInstance): void {
 	}
 }
 
-async function GetStatusData(self: SmartPDUInstance): Promise<void> {
-	self.log('debug', 'Fetching PDU status')
+/** Fetches current status once. Safe to call regardless of whether polling is enabled. */
+export async function RefreshStatus(self: SmartPDUInstance): Promise<void> {
+	self.debugLog('Fetching PDU status')
 
 	try {
-		const url = new URL('/statusjsn.js', `http://${self.config.ip}`)
+		const url = buildUrl(self, '/statusjsn.js')
 		url.searchParams.set('components', '1073741823')
 
-		const res = await fetch(url.toString(), {
-			headers: self.authHeader,
-		})
+		const body = await pduFetch(self, url)
+		const data = JSON.parse(body) as GudeStatusResponse
 
-		if (!res.ok) {
-			const text = await res.text()
-			self.log('error', `Failed to fetch status: ${res.status} - ${text}`)
-		}
-
-		const data = (await res.json()) as GudeStatusResponse
-		//console.log(JSON.stringify(data.sensor_descr, null, 2))
 		processStatusData(self, data)
+		self.updateStatus(InstanceStatus.Ok, 'Connected')
 
-		//if we have not yet updated outlet choices, do it now
+		// first successful fetch: populate outlet/line-dependent definitions
 		if (self.CHOICES_OUTLETS.length === 0) {
 			UpdateOutletChoices(self)
-
+			UpdateLineMeterChoices(self)
 			self.updateActions()
 			self.updateFeedbacks()
 			self.updateVariableDefinitions()
+			self.updatePresets()
 		}
 	} catch (error: any) {
 		self.log('error', `Failed to fetch status: ${error.message}`)
@@ -93,7 +120,7 @@ export function StartPolling(self: SmartPDUInstance): void {
 		isPolling = true
 
 		try {
-			await GetStatusData(self)
+			await RefreshStatus(self)
 		} catch (err: any) {
 			self.log('error', `Polling error: ${err.message}`)
 		} finally {
@@ -102,8 +129,10 @@ export function StartPolling(self: SmartPDUInstance): void {
 		}
 	}
 
-	self.log('debug', `Polling started with interval ${self.config.pollingInterval} ms`)
-	poll()
+	self.debugLog(`Polling started with interval ${self.config.pollingInterval} ms`)
+	// InitConnection() already did one fetch just before calling this — schedule the
+	// first poll rather than firing an immediate redundant one.
+	self.pollingInterval = setTimeout(poll, self.config.pollingInterval)
 }
 
 export function StopPolling(self: SmartPDUInstance): void {
@@ -116,7 +145,7 @@ export function StopPolling(self: SmartPDUInstance): void {
 // --- OUTLET CHOICES ---
 
 export function UpdateOutletChoices(self: SmartPDUInstance): void {
-	self.log('debug', 'Updating outlet choices')
+	self.debugLog('Updating outlet choices')
 	self.CHOICES_OUTLETS = []
 	self.CHOICES_OUTLETS_ALL = []
 
@@ -137,6 +166,20 @@ export function UpdateOutletChoices(self: SmartPDUInstance): void {
 
 	//add an "all outlets" option to the beginning
 	self.CHOICES_OUTLETS_ALL.unshift({ id: -1, label: 'All Outlets' })
+}
+
+// --- LINE METER CHOICES (for energy-counter reset) ---
+
+export function UpdateLineMeterChoices(self: SmartPDUInstance): void {
+	self.CHOICES_LINES = []
+
+	const lineDescr = self.STATUS.sensor_descr?.find((d) => d.type === 1)
+	if (!lineDescr) return
+
+	self.CHOICES_LINES = lineDescr.properties.map((prop) => {
+		const parsed = parseSensorPropertyId(prop.id)
+		return { id: parsed.sensorNumber, label: `${prop.id} - ${prop.name}` }
+	})
 }
 
 // --- SENSOR HELPERS ---
@@ -168,114 +211,77 @@ export async function setOutletState(self: SmartPDUInstance, outlet: number, sta
 		if (state === 'toggle') return await toggleOutlet(self, outlet)
 
 		const value = state === 'on' ? 1 : 0
-		const url = new URL('/ov.html', `http://${self.config.ip}`)
+		const url = buildUrl(self, '/ov.html')
 
-		let outletString = String(outlet)
-		if (outlet == -1) {
-			// Special case for "All Outlets"
-			outletString = 'all'
-		}
+		const outletString = outlet === -1 ? 'all' : String(outlet)
 		url.searchParams.set('cmd', '1')
 		url.searchParams.set('p', outletString)
 		url.searchParams.set('s', String(value))
 
-		const res = await fetch(url.toString(), {
-			method: 'GET',
-			headers: self.authHeader,
-		})
-
-		if (!res.ok) {
-			const text = await res.text()
-			self.log('error', `Failed to set outlet state for outlet ${outlet}: ${res.status} - ${text}`)
-		}
-	} catch (error) {
-		self.log(
-			'error',
-			`Error setting outlet state for outlet ${outlet}: ${error instanceof Error ? error.message : String(error)}`,
-		)
-		return
+		await pduFetch(self, url)
+	} catch (error: any) {
+		self.log('error', `Error setting outlet state for outlet ${outlet}: ${error.message}`)
 	}
 }
 
 export async function resetOutlet(self: SmartPDUInstance, outlet: number): Promise<void> {
-	const url = new URL('/', `http://${self.config.ip}`)
+	try {
+		const url = buildUrl(self, '/')
+		const outletString = outlet === -1 ? 'all' : String(outlet)
 
-	let outletString = String(outlet)
-	if (outlet == -1) {
-		// Special case for "All Outlets"
-		outletString = 'all'
-	}
+		url.searchParams.set('cmd', '12')
+		url.searchParams.set('p', outletString)
 
-	url.searchParams.set('cmd', '12')
-	url.searchParams.set('p', outletString)
-
-	const res = await fetch(url.toString(), {
-		method: 'GET',
-		headers: self.authHeader,
-	})
-
-	if (!res.ok) {
-		const text = await res.text()
-		self.log('error', `Failed to reset outlet ${outlet}: ${res.status} - ${text}`)
+		await pduFetch(self, url)
+	} catch (error: any) {
+		self.log('error', `Failed to reset outlet ${outlet}: ${error.message}`)
 	}
 }
 
 export async function toggleOutlet(self: SmartPDUInstance, outlet: number): Promise<void> {
-	if (outlet == -1) {
-		//cannot toggle all outlets at once
+	if (outlet === -1) {
 		self.log('warn', 'Cannot toggle all outlets at once. Use individual outlet toggling instead.')
-	} else {
-		const outletState = self.STATUS.outputs?.[outlet - 1]
-		if (!outletState) {
-			self.log('warn', `Outlet ${outlet} not found in status data`)
-			return
-		}
-
-		const newState: PowerState = outletState.state ? 'off' : 'on'
-		await setOutletState(self, outlet, newState)
+		return
 	}
+
+	const outletState = self.STATUS.outputs?.[outlet - 1]
+	if (!outletState) {
+		self.log('warn', `Outlet ${outlet} not found in status data`)
+		return
+	}
+
+	const newState: PowerState = outletState.state ? 'off' : 'on'
+	await setOutletState(self, outlet, newState)
 }
 
-export async function setOutletBatchState(
+/**
+ * Delayed on/off for a single outlet, using the device's native two-step batch command (cmd=5):
+ * switch to `firstState`, wait `delaySeconds`, then switch to the opposite state.
+ * This is NOT a multi-outlet primitive — the device has no native multi-outlet stagger.
+ * See UpdateActions() for the software-orchestrated sequence across multiple outlets.
+ */
+export async function delayedOutletSwitch(
 	self: SmartPDUInstance,
-	startOutlet: number,
+	outlet: number,
+	firstState: 0 | 1,
 	delaySeconds: number,
-	states: (0 | 1)[],
 ): Promise<void> {
-	const url = new URL('/', `http://${self.config.ip}`)
+	const url = buildUrl(self, '/')
 	url.searchParams.set('cmd', '5')
-	url.searchParams.set('p', String(startOutlet))
+	url.searchParams.set('p', String(outlet))
+	url.searchParams.set('a1', String(firstState))
+	url.searchParams.set('a2', String(firstState === 1 ? 0 : 1))
 	url.searchParams.set('s', String(delaySeconds))
 
-	states.forEach((state, i) => {
-		url.searchParams.set(`a${i + 1}`, String(state))
-	})
-
-	const res = await fetch(url.toString(), {
-		method: 'GET',
-		headers: self.authHeader,
-	})
-
-	if (!res.ok) {
-		const text = await res.text()
-		throw new Error(`Failed to start outlet batch mode: ${res.status} - ${text}`)
-	}
+	await pduFetch(self, url)
 }
 
-export async function cancelOutletBatch(self: SmartPDUInstance, outlet: number): Promise<void> {
-	const url = new URL('/', `http://${self.config.ip}`)
+export async function cancelDelayedSwitch(self: SmartPDUInstance, outlet: number): Promise<void> {
+	const url = buildUrl(self, '/')
 	url.searchParams.set('cmd', '2')
 	url.searchParams.set('p', String(outlet))
 
-	const res = await fetch(url.toString(), {
-		method: 'GET',
-		headers: self.authHeader,
-	})
-
-	if (!res.ok) {
-		const text = await res.text()
-		throw new Error(`Failed to cancel outlet batch mode: ${res.status} - ${text}`)
-	}
+	await pduFetch(self, url)
 }
 
 // --- STATUS PROCESSING ---
@@ -285,37 +291,6 @@ export function processStatusData(self: SmartPDUInstance, data: GudeStatusRespon
 
 	self.checkVariables()
 	self.checkFeedbacks()
-}
-
-export function parseSensorReadings(status: GudeStatusResponse): any[] {
-	if (!status.sensor_descr || !status.sensor_values) return []
-
-	const readings: any[] = []
-
-	for (const descr of status.sensor_descr) {
-		const values = status.sensor_values.find((v) => v.type === descr.type)
-		if (!values) continue
-
-		for (let i = 0; i < descr.num; i++) {
-			const prop = descr.properties[i]
-			const sensorValues = values.values[i]
-			if (!prop || !sensorValues) continue
-
-			readings.push({
-				id: prop.id,
-				name: prop.name,
-				type: descr.type,
-				readings: descr?.fields?.map((field, index) => ({
-					label: field.name,
-					value: sensorValues[index]?.v ?? NaN,
-					unit: field.unit,
-					precision: field.decPrecision,
-				})),
-			})
-		}
-	}
-
-	return readings
 }
 
 export function flattenSensorFields(status: GudeStatusResponse): FlatSensorMap {
@@ -329,27 +304,20 @@ export function flattenSensorFields(status: GudeStatusResponse): FlatSensorMap {
 
 		for (let sensorIndex = 0; sensorIndex < descr.num; sensorIndex++) {
 			const prop = descr.properties[sensorIndex]
-			let sensorId = prop?.id ?? sensorIndex.toString()
-			let sensorName = normalizeSensorName(sensorId)
-			sensorId = normalizeSensorId(sensorId) // Normalize sensor ID
+			if (!prop) continue
 
-			const safeSensorId = sensorId.replace(/\./g, '').replace(/\s+/g, '').replace(/\:/g, '')
+			const parsed = parseSensorPropertyId(prop.id)
+			const safeSensorId = parsed.raw.replace(/[^\w]/g, '')
 			const fieldValues = values.values[sensorIndex]
 			if (!fieldValues) continue
 
-			//console.log(descr)
-
 			descr?.fields?.forEach((field, fieldIndex) => {
-				//const key = `${descr.type}.${sensorId}.${fieldIndex}`
-
-				//remove sapces, colons, and convert to lowercase for safe field name
-				const safeFieldName = field.name.replace(/\s+/g, '').replace(/\:/g, '').toLowerCase()
+				const safeFieldName = field.name.replace(/\s+/g, '').replace(/:/g, '').toLowerCase()
 				const key = `sensor_${safeSensorId}_${safeFieldName}`
-				//console.log(key)
-				//console.log(field)
+
 				result[key] = {
-					sensorName: sensorName,
-					id: sensorId,
+					sensorName: sensorDisplayName(parsed),
+					id: prop.id,
 					safeId: safeSensorId,
 					type: descr.type,
 					typeName: getSensorTypeLabel(descr.type),
@@ -357,45 +325,11 @@ export function flattenSensorFields(status: GudeStatusResponse): FlatSensorMap {
 					valueString: fieldValues[fieldIndex]?.v?.toString() ?? '',
 					unit: field.unit,
 					name: field.name,
-					decPrecision: field.decPrecision ?? 0, // Default to 0 if not specified
+					decPrecision: field.decPrecision ?? 0,
 				}
 			})
 		}
 	}
 
 	return result
-}
-
-function normalizeSensorId(id: string): string {
-	// Match full pattern with input (e.g., "2: 7210 - I1")
-	const inputMatch = id.match(/^(\d+):.*?- I(\d+)$/)
-	if (inputMatch) {
-		return `${inputMatch[1]}_input${inputMatch[2]}`
-	}
-
-	// Match pattern with no input (e.g., "2: 7210")
-	const sensorMatch = id.match(/^(\d+):/)
-	if (sensorMatch) {
-		return sensorMatch[1]
-	}
-
-	// Fallback: sanitize
-	return id.replace(/[^\w]/g, '_')
-}
-
-function normalizeSensorName(id: string): string {
-	// Match full pattern with input (e.g., "2: 7210 - I1")
-	const inputMatch = id.match(/^(\d+):.*?- I(\d+)$/)
-	if (inputMatch) {
-		return `${inputMatch[1]} Input ${inputMatch[2]}`
-	}
-
-	// Match pattern with no input (e.g., "2: 7210")
-	const sensorMatch = id.match(/^(\d+):/)
-	if (sensorMatch) {
-		return `${sensorMatch[1]}`
-	}
-
-	// Fallback: just return the original or simplified version
-	return id
 }
